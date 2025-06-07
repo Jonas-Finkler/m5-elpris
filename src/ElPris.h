@@ -4,11 +4,13 @@
 #include "HTTPClient.h"
 #include "M5EPD_Canvas.h"
 
+// Electricity price for a given hour
 struct Price {
   float price;
   struct tm time;
 };
 
+// Prices for one day
 struct Prices {
   bool available = false;
   int nPrices = 0;
@@ -35,7 +37,7 @@ private:
 ElPris::ElPris() {
 }
 
-
+// Get current time
 struct tm ElPris::getNow() {
   time_t now;
   time(&now);
@@ -44,6 +46,7 @@ struct tm ElPris::getNow() {
   return timeinfo;
 }
 
+// Get the start of the day for a given day offset
 struct tm ElPris::getDay(int dayOffset) {
   struct tm timeinfo = getNow();
   timeinfo.tm_hour = 0;
@@ -80,9 +83,11 @@ void ElPris::update() {
 
 void ElPris::draw(M5EPD_Canvas canvas) {
   struct tm now = getNow();  // TODO: cache this to save power
-  struct Price allPrices[50];
+  struct Price allPrices[50]; // Prices tht will be drawn
   int iPriceNow = -1; 
-  int nPrices;
+  int nPrices; // Number of prices to be drawn
+
+  // Combine prices from yesteday, today and tomorrow, depending on what is already available
   if (pricesTomorrow.available) {
     if (!(pricesToday.available && pricesTomorrow.available)) {
       Serial.println("Prices not there :(");
@@ -134,10 +139,13 @@ void ElPris::draw(M5EPD_Canvas canvas) {
   int graphW = w - borderL - borderR;
   int graphH = h - borderT - borderB;
 
+  // Labels in x axis
   canvas.setTextSize(2);
   for (int i = 0; i < nPrices; i++) {
+    // Label the current hour and every 6th over if not too close to current to avoid overlap
     if ((allPrices[i].time.tm_hour % 6 == 0 && abs(i - iPriceNow) > 2)
       || (i == iPriceNow)) {
+      // The current hour is highlighted (darker)
       int blackness = i == iPriceNow ? 15 : 10;
       int x = borderL + (i + 1) * graphW / (nPrices + 1);
       int y = borderT + graphH - graphH * (allPrices[i].price - minPrice) / (maxPrice - minPrice);
@@ -148,8 +156,11 @@ void ElPris::draw(M5EPD_Canvas canvas) {
       canvas.drawString(String(hour), x - strWidth / 2, h - borderB + 10);
     }
   }
+
+  // Labels in y axis
   int strHeight = canvas.fontHeight();
   int yNow = borderT + graphH - graphH * (allPrices[iPriceNow].price - minPrice) / (maxPrice - minPrice);
+  // Max and min are labeled if not overlapping with current price
   if (yNow - borderT > 2 * strHeight) {
     canvas.setTextColor(10);
     canvas.drawString(String(maxPrice, 3), w - borderR + 10, borderT - strHeight / 2);
@@ -158,30 +169,39 @@ void ElPris::draw(M5EPD_Canvas canvas) {
     canvas.setTextColor(10);
     canvas.drawString(String(minPrice, 3), w - borderR + 10, h - borderB - strHeight / 2);
   }
+  // Current price
   canvas.drawLine(borderL, yNow, w - borderR, yNow, 2, 5);
   canvas.setTextColor(15);
   canvas.drawString(String(allPrices[iPriceNow].price, 3), w - borderR + 10, yNow - strHeight / 2);
 
+  // Bars for each price
   for (int i = 0; i < nPrices; i++) {
     int blackness = i == iPriceNow ? 15 : 7;
     int x = borderL + (i + 1) * graphW / (nPrices + 1);
     int y = borderT + graphH - graphH * (allPrices[i].price - minPrice) / (maxPrice - minPrice);
+    // round top of the bar
     /*canvas.fillCircle(x, y, 6, blackness);*/
     /*canvas.fillCircle(x, h - borderB, 6, blackness);*/
-    canvas.drawLine(x, y, x, h - borderB, 12, blackness);
+
+    // Only draw the bar, if height is non zero (otherwise, m5p will draw a very short horizontal line)
+    if (y < h - borderB) {
+      canvas.drawLine(x, y, x, h - borderB, 12, blackness);
+    }
   }
 
+  // Outline
   canvas.drawLine(borderL, borderT, w - borderR, borderT, 2, 15);
   canvas.drawLine(borderL, h - borderB, w - borderR, h - borderB, 2, 15);
   canvas.drawLine(borderL, borderT, borderL, h - borderB, 2, 15);
   canvas.drawLine(w - borderR, borderT, w - borderR, h - borderB, 2, 15);
   
+  // Date and time
   char dateStr[20];
   strftime(dateStr, sizeof(dateStr), "%H:%M:%S %d/%m/%Y", &now);
   canvas.setTextColor(15);
   canvas.drawString(dateStr, borderL, 20);
 
-  // print battery voltage
+  // Battery voltage
   float batteryVoltage = M5.getBatteryVoltage() / 1000.0;
   String batteryStr = String(batteryVoltage, 3) + " V";
   int strWidth = canvas.textWidth(batteryStr);
