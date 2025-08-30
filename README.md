@@ -2,7 +2,7 @@
 
 A simple electricity price monitor for Denmark that displays current and upcoming electricity prices on an M5Paper E-Ink display. Updates hourly and uses deep sleep to maximize battery life.
 
-![M5-elpris electricity price monitor](m5-elpris.png)
+![M5-elpris electricity price monitor](./pictures/elpris-monitor.jpeg)
 
 ## Features
 
