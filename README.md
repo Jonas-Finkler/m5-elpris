@@ -1,8 +1,17 @@
 # M5Paper Electricity Price Monitor
 
 A simple electricity price monitor for Denmark that displays current and upcoming electricity prices on an M5Paper E-Ink display. Updates hourly and uses deep sleep to maximize battery life.
+Helps you save money by running appliances when electricity is cheapest!
 
 ![M5-elpris electricity price monitor](./pictures/elpris-monitor.jpeg)
+
+## Why Use This?
+
+Save money by timing your energy usage smartly:
+- Run your washing machine when prices drop (clean clothes, clean conscience!)
+- Charge your EV during low-price hours
+- Avoid running the dishwasher during peak prices (unless you really need those clean forks)
+- Perfect excuse to postpone vacuuming: "Sorry, honey, electricity's too expensive right now!" 
 
 ## Features
 
