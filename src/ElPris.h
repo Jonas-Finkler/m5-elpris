@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include "HTTPClient.h"
 #include "M5EPD_Canvas.h"
+#include <Preferences.h>
 
 // Electricity price for a given hour
 struct Price {
@@ -21,7 +22,10 @@ class ElPris {
 public:
   ElPris();
   void draw(M5EPD_Canvas canvas);
-  void update();
+  bool update();
+  void fetch();
+  void save();
+  bool load();
 private:
   Prices pricesYesterday;
   Prices pricesToday;
@@ -31,6 +35,7 @@ private:
   struct tm getDay(int dayOffset);
   static struct tm parseApiTime(const char* timeStr);
   struct Prices fetchPrices(int dayOffset = 0);
+  Preferences preferences;
 };
 
 
@@ -58,14 +63,35 @@ struct tm ElPris::getDay(int dayOffset) {
   return timeinfo;
 }
 
-void ElPris::update() {
+// Updates the internal state and returns true if new data needs to be fetched from the internet
+bool ElPris::update() {
+  bool needsFetch = false;
   struct tm now = getNow();
+  // if more than 24 hours have passed, we need to fetch
+  if (difftime(mktime(&now), mktime(&lastUpdate)) >= 24 * 60 * 60) {
+    pricesYesterday.available = false;
+    pricesToday.available = false;
+    pricesTomorrow.available = false;
+  }
+
   // check if day has changed
   if (pricesToday.available && now.tm_mday != lastUpdate.tm_mday) {
     pricesYesterday = pricesToday;
     pricesToday = pricesTomorrow;
   }
-  // TOOO: No need to get this if it's not displayed
+
+  needsFetch = !pricesYesterday.available 
+    || !pricesToday.available 
+    || (!pricesTomorrow.available && now.tm_hour >= 13);
+
+  lastUpdate = now;
+
+  return needsFetch;
+};
+
+// Download missing data
+void ElPris::fetch() {
+  // TODO: No need to get this if it's not displayed
   if (!pricesYesterday.available) {
     pricesYesterday = fetchPrices(-1);
   }
@@ -74,11 +100,34 @@ void ElPris::update() {
     pricesToday = fetchPrices();
   }
 
-  if (!pricesTomorrow.available && now.tm_hour >= 13) {  // they are released at 13:00
+  if (!pricesTomorrow.available && lastUpdate.tm_hour >= 13) {  // they are released at 13:00
     pricesTomorrow = fetchPrices(1);
-
   }
-  lastUpdate = now;
+};
+
+
+
+void ElPris::save() {
+  preferences.begin("elpris", false);
+  preferences.putBytes("lastUpdate", &lastUpdate, sizeof(lastUpdate));
+  preferences.putBytes("pricesYesterday", &pricesYesterday, sizeof(pricesYesterday));
+  preferences.putBytes("pricesToday", &pricesToday, sizeof(pricesToday));
+  preferences.putBytes("pricesTomorrow", &pricesTomorrow, sizeof(pricesTomorrow));
+  preferences.end();
+};
+
+bool ElPris::load() {
+  preferences.begin("elpris", true);
+  if (!preferences.isKey("lastUpdate")) {
+    preferences.end();
+    return false;
+  }
+  preferences.getBytes("lastUpdate", &lastUpdate, sizeof(lastUpdate));
+  preferences.getBytes("pricesYesterday", &pricesYesterday, sizeof(pricesYesterday));
+  preferences.getBytes("pricesToday", &pricesToday, sizeof(pricesToday));
+  preferences.getBytes("pricesTomorrow", &pricesTomorrow, sizeof(pricesTomorrow));
+  preferences.end();
+  return true;
 };
 
 void ElPris::draw(M5EPD_Canvas canvas) {
