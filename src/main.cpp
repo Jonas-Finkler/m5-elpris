@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include "EspWizLight.h"
 #include "M5EPD.h"
 #include "WiFiCredentials.h"
 #include "WiFi.h"
@@ -29,29 +28,10 @@ void printTime(const char* message, time_t t);
 
 void setup() {
 
-  // TODO:
-  // Optimize power
-  // - disable Serial
-  // - only call ntp once
-  // Handle errors
-  // - parsing (display on screen)
-  // - WiFi and NTP (display on screen and sleep)
-
-  // NOTE: To clear Preferences
-  // preferences.begin("rtc", false);
-  // preferences.clear();
-  // preferences.end();
-  // preferences.begin("elpris", false);
-  // preferences.clear();
-  // preferences.end();
-  // return;
-
 
   M5.begin();
   M5.RTC.begin();
   Serial.begin(115200);
-
-  canvas.createCanvas(960, 540);
 
   // Set timezone
   setenv("TZ", MY_TZ, 1); 
@@ -59,32 +39,49 @@ void setup() {
 
   // RTC Stuff
   syncSystemClockFromRTC();
-
   time_t now;
   time(&now);
   printTime("RTC Time: ", now);
 
+
+  // If last boot was less than 1 min ago, reset preferences
+  preferences.begin("elpris", true);
+  if (preferences.isKey("lastBoot")) {
+    time_t lastBoot;
+    preferences.getBytes("lastBoot", &lastBoot, sizeof(lastBoot));
+    preferences.end();
+    printTime("Last boot time: ", lastBoot);
+    if (difftime(now, lastBoot) < 60) {
+      Serial.println("Resetting preferences");
+      preferences.begin("elpris", false);
+      preferences.clear();
+      preferences.end();
+    }
+  } else {
+    preferences.end();
+  }
+
+  // Check if we need to connect to WiFi to fetch new data and time
   bool needsFetch = true;
 
-  preferences.begin("rtc", true);
+  // If time has been synced from NTP less than 48h ago, no need to fetch
+  preferences.begin("elpris", true);
   if (preferences.isKey("lastSync")) {
     time_t lastSync;
     preferences.getBytes("lastSync", &lastSync, sizeof(lastSync));
     printTime("Last sync from NTP: ", lastSync);
-    // if last fetch is less than 24h ago, no need to update rtc
-    if (difftime(now, lastSync) < 24 * 60 * 60) {
+    // if last fetch is less than 48h ago, no need to update rtc
+    if (abs(difftime(now, lastSync)) < 48 * 60 * 60) {
       Serial.println("No need to sync NTP");
       needsFetch = false;
     }
   } else {
-    Serial.println("No last sync time stored");
+    Serial.println("No last NTP sync time stored");
   }
   preferences.end();
 
 
-
-
-
+  // If we don't need WiFi, we can try load elpris data from flash
   if (!needsFetch) {
     bool loaded = elPris.load();
     if (loaded) {
@@ -96,21 +93,23 @@ void setup() {
     }
   }
 
+  canvas.createCanvas(960, 540);
+
+  // Update time and fetch new data if needed
   if (needsFetch) {
-    Serial.println("Need to fetch new data and sync NTP");
-    // only show this if we update, otherwise we are done quick
+    Serial.println("Fetching new data");
+
+    // Show some indicator that we are updating, because connecting takes a few seconds
     showWakeupIndicator();
     connectWifi(WIFI_SSID, WIFI_PASSWORD);
     sendLogMessage("Waking up");
 
     connectNTP();
-    time_t now;
-    struct tm timeinfo;
     time(&now);
     printTime("NTP Time: ", now);
     updateRTCFromSystemClock();
 
-    preferences.begin("rtc", false);
+    preferences.begin("elpris", false);
     preferences.putBytes("lastSync", &now, sizeof(now));
     preferences.end();
 
@@ -119,25 +118,24 @@ void setup() {
   }
 
 
-
-
-
-
-
-  /*M5.EPD.SetRotation(90);*/
-  /*M5.TP.SetRotation(90);*/
-  /*M5.EPD.Clear(true);*/
+  // Draw data to e-paper
   elPris.draw(canvas);
-  Serial.println("Setup done");
+
+  // Remember boot time
+  preferences.begin("elpris", false);
+  preferences.putBytes("lastBoot", &now, sizeof(now));
+  preferences.end();
 
 
-  delay(1000); // make sure everything is done before going to sleep
+  // Make sure everything is done before going to sleep
+  delay(1000); 
 
   time(&now);
   printTime("Going to sleep: ", now);
   struct tm timeinfo;
   localtime_r(&now, &timeinfo);
-  // It seems the M5s clock runs too fast (~130s/h) we therefore overshoot by 5 mins to avoid waking up twice per hour
+
+  // The M5 timer has a reduced resolution at 1h sleep, we therefore overshoot a bit to ensure we wake up after the hour change
   int sleepTime = 60 * 60 - timeinfo.tm_min * 60 - timeinfo.tm_sec + 5 * 60;
   Serial.print("Sleeping for ");
   Serial.println(sleepTime);
@@ -158,11 +156,6 @@ void printTime(const char* message, time_t t) {
 }
 
 void showWakeupIndicator() {
-  // int rectSize = 40;
-  // int x = random(0, canvas.width() - rectSize);
-  // int y = random(0, canvas.height() - rectSize);
-  // canvas.fillRect(x, y, rectSize, rectSize, 15);  // 15 = black, 0 = white
-  // NOTE: Clearing is enough for our use case
   canvas.clear(); 
   canvas.setTextColor(10);
   canvas.setTextSize(2);
@@ -179,11 +172,11 @@ void connectNTP() {
   struct timeval tv = {0};
   settimeofday(&tv, nullptr);
 
-
   configTime(0, 0, NTP_SERVER);
   // set the time zone (has to be done after connecting to ntp)
-  setenv("TZ", MY_TZ, 1);  //  Now adjust the time zone
+  setenv("TZ", MY_TZ, 1); 
   tzset();
+
   time_t now;
   time(&now);
   Serial.print("Waiting for NTP");
@@ -196,10 +189,6 @@ void connectNTP() {
 }
 
 void syncSystemClockFromRTC() {
-  // Set timezone
-  // setenv("TZ", MY_TZ, 1); 
-  // tzset();
-
   rtc_time_t rtcTime;
   rtc_date_t rtcDate;
 
@@ -220,11 +209,8 @@ void syncSystemClockFromRTC() {
 
   time_t t = mktime(&timeinfo);   // convert to Unix time
 
-  struct timeval now;
-  now.tv_sec = t;
-  now.tv_usec = 0;
+  struct timeval now = { .tv_sec = t, .tv_usec = 0 };
 
-  // = { .tv_sec = t, .tv_usec = 0 };
   settimeofday(&now, nullptr);
 
   Serial.println("System clock updated from RTC.");
@@ -260,6 +246,8 @@ void connectWifi(const char* ssid, const char* password) {
   Serial.println(WiFi.localIP());
 }
 
+
+// --- Logging --- //
 const char* logServerIP = "192.168.1.89";  
 const uint16_t logServerPort = 4210;
 

@@ -1,5 +1,3 @@
-
-
 #include <Arduino.h>
 #include "HTTPClient.h"
 #include "M5EPD_Canvas.h"
@@ -16,6 +14,7 @@ struct Prices {
   bool available = false;
   int nPrices = 0;
   Price prices[25]; // max 25 hours per day (DLST)
+  struct tm date;
 };
 
 class ElPris {
@@ -54,31 +53,54 @@ struct tm ElPris::getNow() {
 // Get the start of the day for a given day offset
 struct tm ElPris::getDay(int dayOffset) {
   struct tm timeinfo = getNow();
-  timeinfo.tm_hour = 0;
-  timeinfo.tm_min = 0;
-  timeinfo.tm_sec = 0;
-  time_t now = mktime(&timeinfo);
-  now += dayOffset * 24 * 60 * 60;
-  localtime_r(&now, &timeinfo);
+  timeinfo.tm_mday += dayOffset;
+  mktime(&timeinfo); // normalize
   return timeinfo;
 }
 
-// Updates the internal state and returns true if new data needs to be fetched from the internet
+// Updates internal state and returns whether new data needs to be fetched
 bool ElPris::update() {
+  Prices prices[3] = {pricesYesterday, pricesToday, pricesTomorrow};
   bool needsFetch = false;
   struct tm now = getNow();
-  // if more than 24 hours have passed, we need to fetch
-  if (difftime(mktime(&now), mktime(&lastUpdate)) >= 24 * 60 * 60) {
-    pricesYesterday.available = false;
-    pricesToday.available = false;
-    pricesTomorrow.available = false;
+
+  pricesYesterday.available = false;
+  pricesToday.available = false;
+  pricesTomorrow.available = false;
+
+  // update yesterday, today, tomorrow 
+  for (int i = -1; i < 2; i++) {
+    struct tm theday = now;
+    theday.tm_mday += i;
+    mktime(&theday); // normalize
+
+    for (int j = 0; j < 3; j++) {
+      if (prices[j].available 
+        && prices[j].date.tm_year == theday.tm_year
+        && prices[j].date.tm_mon == theday.tm_mon
+        && prices[j].date.tm_mday == theday.tm_mday) {
+        switch (i) {
+          case -1:
+            pricesYesterday = prices[j];
+            Serial.print("Found prices for yesterday at ");
+            Serial.println(j);
+            break;
+          case 0:
+            pricesToday = prices[j];
+            Serial.print("Found prices for today at ");
+            Serial.println(j);
+            break;
+          case 1:
+            pricesTomorrow = prices[j];
+            Serial.print("Found prices for tomorrow at ");
+            Serial.println(j);
+            break;
+        }
+        break;
+      }
+    }
   }
 
-  // check if day has changed
-  if (pricesToday.available && now.tm_mday != lastUpdate.tm_mday) {
-    pricesYesterday = pricesToday;
-    pricesToday = pricesTomorrow;
-  }
 
   needsFetch = !pricesYesterday.available 
     || !pricesToday.available 
@@ -131,7 +153,7 @@ bool ElPris::load() {
 };
 
 void ElPris::draw(M5EPD_Canvas canvas) {
-  struct tm now = getNow();  // TODO: cache this to save power
+  struct tm now = lastUpdate;
   struct Price allPrices[50]; // Prices tht will be drawn
   int iPriceNow = -1; 
   int nPrices; // Number of prices to be drawn
@@ -272,6 +294,7 @@ struct Prices ElPris::fetchPrices(int dayOffset) {
   
   // Get current date in YYYY/MM-DD format
   struct tm timeinfo = getDay(dayOffset);
+  prices.date = timeinfo;
 
   char dateStr[11];
   strftime(dateStr, sizeof(dateStr), "%Y/%m-%d", &timeinfo);
@@ -295,8 +318,8 @@ struct Prices ElPris::fetchPrices(int dayOffset) {
   }
   String payload = http.getString();
   http.end();
-  Serial.print("Got: ");
-  Serial.println(payload);
+  // Serial.print("Got: ");
+  // Serial.println(payload);
   
   // Parse JSON
   JsonDocument doc; // Adjust size if needed
