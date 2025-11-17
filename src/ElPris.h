@@ -52,7 +52,7 @@ struct tm ElPris::getNow() {
 
 // Get the start of the day for a given day offset
 struct tm ElPris::getDay(int dayOffset) {
-  struct tm timeinfo = getNow();
+  struct tm timeinfo = lastUpdate;
   timeinfo.tm_mday += dayOffset;
   mktime(&timeinfo); // normalize
   return timeinfo;
@@ -62,7 +62,7 @@ struct tm ElPris::getDay(int dayOffset) {
 bool ElPris::update() {
   Prices prices[3] = {pricesYesterday, pricesToday, pricesTomorrow};
   bool needsFetch = false;
-  struct tm now = getNow();
+  lastUpdate = getNow();
 
   pricesYesterday.available = false;
   pricesToday.available = false;
@@ -70,7 +70,7 @@ bool ElPris::update() {
 
   // update yesterday, today, tomorrow 
   for (int i = -1; i < 2; i++) {
-    struct tm theday = now;
+    struct tm theday = lastUpdate;
     theday.tm_mday += i;
     mktime(&theday); // normalize
 
@@ -104,9 +104,8 @@ bool ElPris::update() {
 
   needsFetch = !pricesYesterday.available 
     || !pricesToday.available 
-    || (!pricesTomorrow.available && now.tm_hour >= 13);
+    || (!pricesTomorrow.available && lastUpdate.tm_hour >= 13);
 
-  lastUpdate = now;
 
   return needsFetch;
 };
